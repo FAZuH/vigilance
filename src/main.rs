@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::{config::Config, notify::LinuxNotify, watch::WatchService};
+use crate::config::Config;
+use crate::notify::LinuxNotify;
+use crate::watch::WatchService;
 
 pub mod config;
 pub mod error;
@@ -13,7 +15,7 @@ pub mod watch;
 pub use error::Error;
 pub use error::Result;
 
-pub const APP_NAME: &'static str = env!("CARGO_PKG_NAME");
+pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 
 fn main() {
     info!("Starting vigilance daemon");

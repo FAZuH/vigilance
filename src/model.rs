@@ -1,12 +1,15 @@
-use dbus::arg;
-use dbus::blocking::Connection;
-use dbus::Message;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{debug, info, warn};
+use dbus::Message;
+use dbus::arg;
+use dbus::blocking::Connection;
+
+use crate::debug;
+use crate::info;
+use crate::warn;
 
 pub struct Battery {
     running: Arc<AtomicBool>,

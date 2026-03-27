@@ -1,9 +1,10 @@
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
-use std::{path::PathBuf, time::Duration};
-
-use crate::{debug, error, info};
-
+use crate::debug;
+use crate::error;
+use crate::info;
 pub use crate::watch::WatchEvents;
 
 pub trait Notifiable {

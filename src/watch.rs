@@ -1,20 +1,23 @@
-use crate::notify::{Notification, Urgency};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use std::{
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
-    },
-};
 
-use crate::{
-    config::Config,
-    debug, error, info,
-    model::{Battery, BatteryData, Disk, Memory, MemoryData},
-    notify::Notifiable,
-};
+use crate::config::Config;
+use crate::debug;
+use crate::error;
+use crate::info;
+use crate::model::Battery;
+use crate::model::BatteryData;
+use crate::model::Disk;
+use crate::model::Memory;
+use crate::model::MemoryData;
+use crate::notify::Notifiable;
+use crate::notify::Notification;
+use crate::notify::Urgency;
 
 pub struct WatchService {
     config: Arc<Config>,
@@ -96,7 +99,7 @@ impl WatchService {
                             };
 
                             Notification {
-                                summary: format!("Disk Almost Full"),
+                                summary: "Disk Almost Full".to_string(),
                                 body: Some(format!(
                                     "{} at {} is {:.0}% full",
                                     event.name,
