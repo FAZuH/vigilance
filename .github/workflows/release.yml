@@ -1,0 +1,145 @@
+# Credit: Workflow configs based on https://github.com/Wynntils/Wynntils
+
+name: Release & Deploy
+
+on:
+  push:
+    branches:
+      - release
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.changelog.outputs.tag }}
+      skipped: ${{ steps.changelog.outputs.skipped }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Up version.json
+        run: echo "{\"version\":\"$(git describe --tags --abbrev=0 2>/dev/null || echo '0.0.0')\"}" > version.json
+
+      - name: Create Changelog
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v5.2.1
+        with:
+          github-token: ${{ secrets.PRIVATE_TOKEN }}
+          git-user-name: "faz-bot"
+          git-user-email: "mail@fazuh.com"
+          pre-commit: ./.github/.pre-commit.js
+          config-file-path: ./.github/.config.js
+          version-file: ./version.json
+          skip-version-file: true
+          skip-git-pull: true
+          skip-on-empty: false
+          release-count: 5
+
+  build:
+    name: Build Binary
+    needs: changelog
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.changelog.outputs.tag }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --fix-missing libfontconfig1-dev
+
+      - name: Build Package
+        run: cargo build --release
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwr-bot
+          path: target/release/pwr-bot
+
+  push-image:
+    name: Docker Build & Push
+    needs: changelog
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.changelog.outputs.tag }}
+
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log In to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set lowercase repo owner
+        id: repo
+        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.owner }}/pwr-bot:latest
+            ghcr.io/${{ steps.repo.outputs.owner }}/pwr-bot:${{ needs.changelog.outputs.tag }}
+          labels: |
+            version=${{ needs.changelog.outputs.tag }}
+            commit=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release-github:
+    name: Release to GitHub
+    needs: [changelog, build]
+    if: ${{ needs.changelog.outputs.skipped != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pwr-bot
+          path: target/release
+
+      - name: Create Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.changelog.outputs.tag }}
+          body: ${{ needs.changelog.outputs.changelog }}
+          files: target/release/pwr-bot
+
+      - name: Post Release on Discord
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          embed-color: "9498256"
+          embed-title: "pwr-bot ${{ needs.changelog.outputs.tag }}"
+          embed-description: ${{ needs.changelog.outputs.changelog }}
+          embed-url: ${{ steps.release.outputs.url }}
+          embed-timestamp: ${{ github.event.head_commit.timestamp }}

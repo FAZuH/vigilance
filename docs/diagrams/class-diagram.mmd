@@ -1,0 +1,70 @@
+--- 
+config:
+  class: 
+    hideEmptyMembersBox: true 
+---
+classDiagram
+	direction LR
+	namespace model {
+        class MemoryData {
+            u64 total_memory
+            u64 used_memory
+            u64 total_swap
+            u64 used_swap
+        }
+		class Battery { + get() battery::Batteries }
+		class Disk { + get() sysinfo::Disks }
+		class Memory { + get() MemoryData }
+		class Wifi { + get() wifiscanner::Wifi }
+	}
+    Memory ..> MemoryData
+	
+	namespace notif {
+		class Notifiable {
+			<<trait>>
+			+notify(event: WatchEvents)
+		}
+		class NotifyRust
+	}
+	Notifiable --|> WatchEvents
+	NotifyRust --|> Notifiable
+	
+	namespace watch {
+		class WatchSource {
+			+ listen() std::sync::mpsc::Receiver~WatchEvents~
+		}
+		class WatchEvents {
+			<<enum>>
+			Battery
+			Disk
+			Memory
+			Wifi
+		}	
+		class WatchService {
+			- WatchSource source
+			- Box~dyn Notifiable~ notifier
+			+ start()
+		}
+		class BatteryEvent { + battery::Battery battery }
+		class DiskEvent { + sysinfo::Disk disk }
+		class MemoryEvent { + u64 bytes }
+		class WifiEvent { + wifiscanner::Wifi wifi }
+	}
+	WatchService *-- WatchSource
+	WatchService *-- Notifiable
+	WatchSource ..> WatchEvents
+	WatchSource ..> Battery
+	WatchSource ..> Disk
+	WatchSource ..> Memory
+	WatchSource ..> Wifi
+	WatchEvents *-- BatteryEvent
+	WatchEvents *-- DiskEvent
+	WatchEvents *-- MemoryEvent
+	WatchEvents *-- WifiEvent
+
+	namespace app {
+		class main
+		class AppConfig
+	}
+	main *-- WatchService
+	main *-- AppConfig
