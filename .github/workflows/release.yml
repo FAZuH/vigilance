@@ -74,46 +74,6 @@ jobs:
           name: pwr-bot
           path: target/release/pwr-bot
 
-  push-image:
-    name: Docker Build & Push
-    needs: changelog
-    if: ${{ needs.changelog.outputs.skipped != 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.changelog.outputs.tag }}
-
-      - name: Set Up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log In to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set lowercase repo owner
-        id: repo
-        run: echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
-
-      - name: Build and Push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ghcr.io/${{ steps.repo.outputs.owner }}/pwr-bot:latest
-            ghcr.io/${{ steps.repo.outputs.owner }}/pwr-bot:${{ needs.changelog.outputs.tag }}
-          labels: |
-            version=${{ needs.changelog.outputs.tag }}
-            commit=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   release-github:
     name: Release to GitHub
     needs: [changelog, build]
