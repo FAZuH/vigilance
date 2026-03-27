@@ -99,7 +99,8 @@ impl WatchService {
                             );
                             let conf = &conf.disk;
 
-                            if !conf.watch_disks.contains(&event.name) {
+                            let mount_point = event.mount_point.to_string_lossy().to_string();
+                            if !conf.watch_mounts.contains(&mount_point) {
                                 continue;
                             }
 
@@ -114,9 +115,7 @@ impl WatchService {
                                 summary: "Disk Almost Full".to_string(),
                                 body: Some(format!(
                                     "{} at {} is {:.0}% full",
-                                    event.name,
-                                    event.mount_point.to_string_lossy(),
-                                    perc_usage
+                                    event.name, mount_point, perc_usage
                                 )),
                                 urgency: Some(Urgency::Critical),
                                 ..Default::default()

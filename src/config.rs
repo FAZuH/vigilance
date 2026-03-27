@@ -100,11 +100,16 @@ impl MemoryConfig {
     }
 }
 
+fn default_mounts() -> HashSet<String> {
+    HashSet::from_iter(["/".to_string()])
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DiskConfig {
     pub enabled: bool,
-    pub watch_disks: HashSet<String>,
+    #[serde(default = "default_mounts")]
+    pub watch_mounts: HashSet<String>,
     pub poll_interval_secs: u64,
     pub critical_threshold: u8,
     pub on_critical: Vec<String>,
@@ -114,7 +119,7 @@ impl Default for DiskConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            watch_disks: HashSet::new(),
+            watch_mounts: default_mounts(),
             poll_interval_secs: 10,
             critical_threshold: 95,
             on_critical: Vec::new(),
