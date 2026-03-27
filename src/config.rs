@@ -1,6 +1,9 @@
-use std::{collections::HashSet, time::Duration};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::{collections::HashSet, time::Duration};
+
+use crate::{debug, info};
+use crate::utils;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -8,24 +11,29 @@ pub struct Config {
     pub battery: BatteryConfig,
     pub memory: MemoryConfig,
     pub disk: DiskConfig,
-    pub wifi: WifiConfig,
+    // pub wifi: WifiConfig,
 }
 
 impl Config {
     pub fn load() -> Result<Self, ConfigError> {
-        let conf_dir = crate::utils::conf_dir();
+        let conf_dir = utils::conf_dir();
+        debug!("Config directory: {:?}", conf_dir);
         if !conf_dir.exists() {
             fs::create_dir_all(&conf_dir)?;
+            info!("Created config directory at {conf_dir:?}");
         }
         let conf_path = conf_dir.join("config.yaml");
         if !conf_path.exists() {
             let config = Config::default();
             let file = fs::File::create(&conf_path)?;
             serde_yml::to_writer(&file, &config)?;
+            info!("Default config written to {:?}", conf_path);
             Ok(config)
         } else {
             let file = fs::File::open(&conf_path)?;
-            Ok(serde_yml::from_reader(&file)?)
+            let config: Config = serde_yml::from_reader(&file)?;
+            info!("Configuration loaded successfully");
+            Ok(config)
         }
     }
 }
@@ -116,28 +124,30 @@ impl DiskConfig {
     }
 }
 
-fn default_true() -> bool { true }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct WifiConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    pub watch_interfaces: HashSet<String>,
-    pub on_connect: Vec<String>,
-    pub on_disconnect: Vec<String>,
-}
-
-impl Default for WifiConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            watch_interfaces: HashSet::new(),
-            on_connect: Vec::new(),
-            on_disconnect: Vec::new(),
-        }
-    }
-}
+// fn default_true() -> bool {
+//     true
+// }
+//
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// #[serde(default)]
+// pub struct WifiConfig {
+//     #[serde(default = "default_true")]
+//     pub enabled: bool,
+//     pub watch_interfaces: HashSet<String>,
+//     pub on_connect: Vec<String>,
+//     pub on_disconnect: Vec<String>,
+// }
+//
+// impl Default for WifiConfig {
+//     fn default() -> Self {
+//         Self {
+//             enabled: true,
+//             watch_interfaces: HashSet::new(),
+//             on_connect: Vec::new(),
+//             on_disconnect: Vec::new(),
+//         }
+//     }
+// }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -145,5 +155,5 @@ pub enum ConfigError {
     Io(#[from] std::io::Error),
 
     #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_yml::Error)
+    Serialization(#[from] serde_yml::Error),
 }

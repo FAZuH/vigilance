@@ -1,9 +1,20 @@
-use std::{path::PathBuf, sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc}};
+use crate::notify::{Notification, Urgency};
 use std::thread;
 use std::time::Duration;
-use crate::notify::{Notification, Urgency};
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
+};
 
-use crate::{config::Config, model::{Battery, BatteryData, Disk, Memory, MemoryData}, notify::Notifiable};
+use crate::{
+    config::Config,
+    debug, error, info,
+    model::{Battery, BatteryData, Disk, Memory, MemoryData},
+    notify::Notifiable,
+};
 
 pub struct WatchService {
     config: Arc<Config>,
@@ -24,57 +35,88 @@ impl WatchService {
     }
 
     pub fn start(&self) {
+        info!("WatchService::start() - starting event loop");
         let running = self.running.clone();
         running.store(true, Ordering::SeqCst);
         let rx = self.source.listen();
         let conf = self.config.clone();
+        debug!("Entering main event loop");
         for event in rx {
             if !running.load(Ordering::SeqCst) {
-                return
+                info!("WatchService stopped");
+                return;
             }
             match event {
                 Ok(event) => {
+                    debug!("Received event: {:?}", event);
                     let notif = match event {
                         WatchEvents::Battery(event) => {
+                            debug!("Battery event: {}%", event.percentage);
                             let conf = &conf.battery;
 
                             if event.percentage > conf.low_threshold {
-                                continue
+                                continue;
                             }
-                            
+
                             Notification {
-                                summary: format!("Battery {}", if event.percentage <= conf.critical_threshold { "Critical" } else { "Low" }),
+                                summary: format!(
+                                    "Battery {}",
+                                    if event.percentage <= conf.critical_threshold {
+                                        "Critical"
+                                    } else {
+                                        "Low"
+                                    }
+                                ),
                                 body: Some(format!("{}% remaining", event.percentage)),
-                                urgency: Some(if event.percentage <= conf.critical_threshold { Urgency::Critical } else { Urgency::Low }),
+                                urgency: Some(if event.percentage <= conf.critical_threshold {
+                                    Urgency::Critical
+                                } else {
+                                    Urgency::Low
+                                }),
                                 ..Default::default()
                             }
-                        },
+                        }
                         WatchEvents::Disk(event) => {
+                            debug!(
+                                "Disk event: {} at {}",
+                                event.name,
+                                event.mount_point.to_string_lossy()
+                            );
                             let conf = &conf.disk;
 
                             if !conf.watch_disks.contains(&event.name) {
-                                continue
+                                continue;
                             }
 
-                            let perc_usage = (1.0 - (event.available_space / event.total_space) as f64) * 100.0;
+                            let perc_usage =
+                                (1.0 - (event.available_space / event.total_space) as f64) * 100.0;
 
                             if perc_usage < conf.critical_threshold.into() {
-                                continue
+                                continue;
                             };
 
                             Notification {
                                 summary: format!("Disk Almost Full"),
-                                body: Some(format!("{} at {} is {:.0}% full", event.name, event.mount_point.to_string_lossy(), perc_usage)),
+                                body: Some(format!(
+                                    "{} at {} is {:.0}% full",
+                                    event.name,
+                                    event.mount_point.to_string_lossy(),
+                                    perc_usage
+                                )),
                                 urgency: Some(Urgency::Critical),
                                 ..Default::default()
                             }
-                        },
+                        }
                         WatchEvents::Memory(e) => {
+                            debug!(
+                                "Memory event: {}/{} bytes used",
+                                e.used_memory, e.total_memory
+                            );
                             let conf = &conf.memory;
 
                             let mem_perc = (e.used_memory / e.total_memory) as f64 * 100.0;
                             if mem_perc < conf.critical_threshold.into() {
-                                continue
+                                continue;
                             };
 
                             Notification {
@@ -83,18 +125,19 @@ impl WatchService {
                                 urgency: Some(Urgency::Critical),
                                 ..Default::default()
                             }
-                        },
+                        }
                     };
                     let _ = self.notifier.notify(notif);
-                },
+                }
                 Err(e) => {
-                    println!("ERROR: {e}");
+                    error!("Watch event error: {e}");
                 }
             }
         }
     }
 
     pub fn stop(&self) {
+        debug!("WatchService::stop()");
         self.running.store(false, Ordering::SeqCst);
     }
 }
@@ -105,7 +148,7 @@ impl Drop for WatchService {
     }
 }
 
-pub struct WatchSource { 
+pub struct WatchSource {
     config: Arc<Config>,
     running: Arc<AtomicBool>,
     battery: Arc<Battery>,
@@ -125,25 +168,37 @@ impl WatchSource {
     }
 
     pub fn listen(&self) -> mpsc::Receiver<Result<WatchEvents, WatchError>> {
+        debug!("WatchSource::listen() - creating channel");
         let (tx, rx) = mpsc::channel();
 
         let config = self.config.clone();
         let tx_c = tx.clone();
         let running = self.running.clone();
         let memory = self.memory.clone();
+        debug!("Spawning memory monitoring thread");
         thread::spawn(move || {
+            info!(
+                "Memory monitor thread started (interval: {}s)",
+                config.memory.poll_interval_secs
+            );
             while config.memory.enabled && running.load(Ordering::SeqCst) {
                 let memory = memory.get();
                 tx_c.send(Ok(WatchEvents::Memory(memory))).unwrap();
                 thread::sleep(Duration::from_secs(config.memory.poll_interval_secs))
             }
+            info!("Memory monitor thread stopped");
         });
 
         let config = self.config.clone();
         let disk = self.disk.clone();
         let tx_c = tx.clone();
         let running = self.running.clone();
+        debug!("Spawning disk monitoring thread");
         thread::spawn(move || {
+            info!(
+                "Disk monitor thread started (interval: {}s)",
+                config.disk.poll_interval_secs
+            );
             while config.disk.enabled && running.load(Ordering::SeqCst) {
                 for disk in &disk.get() {
                     let event = DiskEvent {
@@ -156,14 +211,17 @@ impl WatchSource {
                 }
                 thread::sleep(Duration::from_secs(config.disk.poll_interval_secs))
             }
+            info!("Disk monitor thread stopped");
         });
 
         let config = self.config.clone();
         let battery = self.battery.clone();
         let tx_c = tx.clone();
         let running = self.running.clone();
+        debug!("Spawning battery monitoring thread");
         thread::spawn(move || {
             if config.battery.enabled && running.load(Ordering::SeqCst) {
+                info!("Battery monitor thread started");
                 let callback = move |battery: BatteryData| {
                     tx_c.send(Ok(WatchEvents::Battery(battery))).unwrap();
                     if !config.battery.enabled {
@@ -171,6 +229,7 @@ impl WatchSource {
                     }
                 };
                 let _ = battery.publish_to(callback);
+                info!("Battery monitor thread stopped");
             }
         });
 
@@ -178,12 +237,14 @@ impl WatchSource {
     }
 }
 
+#[derive(Debug)]
 pub enum WatchEvents {
     Battery(BatteryData),
     Disk(DiskEvent),
     Memory(MemoryData),
 }
 
+#[derive(Debug)]
 pub struct DiskEvent {
     name: String,
     mount_point: PathBuf,

@@ -2,6 +2,8 @@ use std::process::Command;
 
 use std::{path::PathBuf, time::Duration};
 
+use crate::{debug, error, info};
+
 pub use crate::watch::WatchEvents;
 
 pub trait Notifiable {
@@ -16,10 +18,6 @@ pub struct Notification {
     pub expire_time: Option<Duration>,
     pub app_name: Option<String>,
     pub icon: Option<PathBuf>,
-    // app_icon: Option<PathBuf>,
-    // category: Option<Vec<String>>,
-    // transient: Option<bool>,
-    // wait: Option<Duration>,
 }
 
 #[derive(Clone, Debug)]
@@ -41,11 +39,11 @@ pub enum NotifyError {
     PermissionDenied(String),
 }
 
-pub struct LinuxNotify { }
+pub struct LinuxNotify {}
 
 impl LinuxNotify {
     pub fn new() -> Self {
-        Self { }
+        Self {}
     }
     fn get_args(notif: Notification) -> Vec<String> {
         let mut ret = Vec::new();
@@ -57,45 +55,54 @@ impl LinuxNotify {
                 Urgency::Normal => "normal",
                 Urgency::Critical => "critical",
             };
-            ret.push(u.to_string())
+            ret.push(u.to_string());
+            debug!("Urgency: {}", u);
         }
         if let Some(expire_time) = notif.expire_time {
             ret.push("-t".to_string());
-            ret.push(expire_time.as_millis().to_string())
+            ret.push(expire_time.as_millis().to_string());
         }
         if let Some(app_name) = notif.app_name {
             ret.push("-a".to_string());
-            ret.push(app_name)
+            ret.push(app_name);
         }
         if let Some(icon) = notif.icon {
             ret.push("-i".to_string());
-            ret.push(icon.to_string_lossy().into())
+            ret.push(icon.to_string_lossy().into());
         }
-        ret.push(notif.summary);
+        ret.push(notif.summary.clone());
         if let Some(body) = notif.body {
-            ret.push(body)
+            ret.push(body);
         }
 
+        debug!("Notification args: {:?}", ret);
         ret
     }
 }
 
 impl Notifiable for LinuxNotify {
     fn notify(&self, notif: Notification) -> Result<(), NotifyError> {
+        debug!("LinuxNotify::notify() - sending notification: {notif:?}");
         let args = Self::get_args(notif);
-        // TODO: Handle res
 
-        match Command::new("notify-send").args(args).status() {
+        match Command::new("notify-send").args(&args).status() {
             Ok(status) => {
                 if status.success() {
+                    info!("Notification sent successfully");
                     Ok(())
                 } else {
-                    Err(NotifyError::Failed(format!("notify-send returned: {status}")))
+                    error!("notify-send returned: {status}");
+                    Err(NotifyError::Failed(format!(
+                        "notify-send returned: {status}"
+                    )))
                 }
-            },
+            }
             Err(e) => {
-                Err(NotifyError::Failed(format!("Error executing notify-send: {e}")))
-            },
+                error!("Failed to execute notify-send: {e}");
+                Err(NotifyError::Failed(format!(
+                    "Error executing notify-send: {e}"
+                )))
+            }
         }
     }
 }
