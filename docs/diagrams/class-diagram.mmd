@@ -7,11 +7,11 @@ classDiagram
     direction LR
 
     namespace notif {
-        class Notifiable {
+        class Notifiable:::infra {
             <<trait>>
             +notify(notif: Notification) Result~(), NotifyError~
         }
-        class Notification {
+        class Notification:::entity {
             +String summary
             +Option~String~ body
             +Option~Urgency~ urgency
@@ -19,13 +19,13 @@ classDiagram
             +Option~String~ app_name
             +Option~PathBuf~ icon
         }
-        class Urgency {
+        class Urgency:::entity {
             <<enum>>
             Low
             Normal
             Critical
         }
-        class LinuxNotify {
+        class LinuxNotify:::infra {
             +new() LinuxNotify
             -get_args(notif: Notification) Vec~String~
         }
@@ -35,24 +35,24 @@ classDiagram
     Notifiable ..> Notification
 
     namespace model {
-        class MemoryData {
+        class MemoryData:::entity {
             +u64 total_memory
             +u64 used_memory
             +u64 total_swap
             +u64 used_swap
         }
-        class BatteryModel {
+        class BatteryModel:::domain {
             -Arc~AtomicBool~ running
             +new(running: Option~Arc~AtomicBool~~) BatteryModel
             +publish_to~F~(callback: F) Result~(), ModelError~
             +stop()
         }
-        class BatteryEvent {
+        class BatteryEvent:::entity {
             <<enum>>
             PercentageUpdate(u8)
             StateUpdate(BatteryState)
         }
-        class BatteryState {
+        class BatteryState:::entity {
             <<enum>>
             Unknown
             Charging
@@ -62,17 +62,17 @@ classDiagram
             PendingCharge
             PendingDischarge
         }
-        class DiskModel {
+        class DiskModel:::domain {
             +new() DiskModel
             +get() sysinfo::Disks
         }
-        class DiskEvent {
+        class DiskEvent:::entity {
             +String name
             +PathBuf mount_point
             +u64 total_space
             +u64 available_space
         }
-        class MemoryModel {
+        class MemoryModel:::domain {
             +new() MemoryModel
             +get() MemoryData
         }
@@ -81,7 +81,7 @@ classDiagram
     BatteryEvent ..> BatteryState
 
     namespace watch {
-        class WatchSource {
+        class WatchSource:::service {
             -Arc~Config~ config
             -Arc~AtomicBool~ running
             -Arc~Battery~ battery
@@ -90,13 +90,13 @@ classDiagram
             +new(config: Arc~Config~, running: Arc~AtomicBool~) WatchSource
             +listen() Receiver~Result~WatchEvents~~
         }
-        class WatchEvents {
+        class WatchEvents:::entity {
             <<enum>>
             Battery(BatteryEvent)
             Disk(DiskEvent)
             Memory(MemoryData)
         }
-        class WatchService {
+        class WatchService:::service {
             -Arc~Config~ config
             -WatchSource source
             -Box~dyn Notifiable~ notifier
@@ -118,10 +118,10 @@ classDiagram
     WatchEvents ..> MemoryData
 
     namespace app {
-        class main {
+        class main:::app {
             +main()
         }
-        class Config {
+        class Config:::app {
             +BatteryConfig battery
             +MemoryConfig memory
             +DiskConfig disk
@@ -131,3 +131,9 @@ classDiagram
     main ..> WatchService
     main ..> Config
     main ..> LinuxNotify
+
+    classDef infra fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f,stroke-width:1.5px
+    classDef domain fill:#dcfce7,stroke:#22c55e,color:#14532d,stroke-width:1.5px
+    classDef service fill:#ffedd5,stroke:#f97316,color:#7c2d12,stroke-width:1.5px
+    classDef app fill:#f3e8ff,stroke:#a855f7,color:#3b0764,stroke-width:1.5px
+    classDef entity fill:#e0e7ff,stroke:#6366f1,color:#1e1b4b,stroke-width:1.5px
