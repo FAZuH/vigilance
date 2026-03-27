@@ -86,7 +86,7 @@ impl Default for MemoryConfig {
         Self {
             enabled: true,
             poll_interval_secs: 10,
-            warning_threshold: 85,
+            warning_threshold: 90,
             critical_threshold: 95,
             on_warning: Vec::new(),
             on_critical: Vec::new(),
