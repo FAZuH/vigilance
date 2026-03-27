@@ -206,14 +206,15 @@ impl WatchService {
             return None;
         }
 
-        let perc_usage = (1.0 - (e.available_space / e.total_space) as f64) * 100.0;
+        let perc_usage =
+            ((e.total_space - e.available_space) as f64 / e.total_space as f64) * 100.0;
 
         if perc_usage < conf.critical_threshold.into() {
             return None;
         };
 
         let body = format!(
-            "{} ({}): {} free of {} ({:.0}% used)\nFree up space to prevent system issues",
+            "{} ({}):\n\n{} free of {}\n({:.0}% used)",
             e.name,
             mount_point,
             format_bytes(e.available_space),
