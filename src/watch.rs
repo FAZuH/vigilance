@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use crate::APP_NAME;
 use crate::config::Config;
 use crate::debug;
 use crate::error;
@@ -19,6 +20,7 @@ use crate::model::MemoryData;
 use crate::notify::Notifiable;
 use crate::notify::Notification;
 use crate::notify::Urgency;
+use crate::utils::format_bytes;
 
 pub struct WatchService {
     config: Arc<Config>,
@@ -54,92 +56,18 @@ impl WatchService {
                 Ok(event) => {
                     debug!("Received event: {:?}", event);
                     let notif = match event {
-                        WatchEvents::Battery(event) => {
-                            let conf = &conf.battery;
-                            match event {
-                                BatteryEvent::PercentageUpdate(perc) => {
-                                    debug!("Battery: {}%", perc);
-                                    if perc > conf.low_threshold {
-                                        continue;
-                                    }
-                                    let critical = perc <= conf.critical_threshold;
-                                    Notification {
-                                        summary: format!(
-                                            "Battery {}",
-                                            if critical { "Critical" } else { "Low" }
-                                        ),
-                                        body: Some(format!("{}% remaining", perc)),
-                                        urgency: Some(if critical {
-                                            Urgency::Critical
-                                        } else {
-                                            Urgency::Low
-                                        }),
-                                        ..Default::default()
-                                    }
-                                }
-                                BatteryEvent::StateUpdate(state) => {
-                                    debug!("Battery state: {}", state);
-                                    Notification {
-                                        summary: format!("Battery {}", state),
-                                        urgency: Some(match state {
-                                            BatteryState::Empty => Urgency::Critical,
-                                            BatteryState::Discharging => Urgency::Low,
-                                            _ => Urgency::Normal,
-                                        }),
-                                        ..Default::default()
-                                    }
-                                }
-                            }
-                        }
-                        WatchEvents::Disk(event) => {
-                            debug!(
-                                "Disk event: {} at {}",
-                                event.name,
-                                event.mount_point.to_string_lossy()
-                            );
-                            let conf = &conf.disk;
-
-                            let mount_point = event.mount_point.to_string_lossy().to_string();
-                            if !conf.watch_mounts.contains(&mount_point) {
-                                continue;
-                            }
-
-                            let perc_usage =
-                                (1.0 - (event.available_space / event.total_space) as f64) * 100.0;
-
-                            if perc_usage < conf.critical_threshold.into() {
-                                continue;
-                            };
-
-                            Notification {
-                                summary: "Disk Almost Full".to_string(),
-                                body: Some(format!(
-                                    "{} at {} is {:.0}% full",
-                                    event.name, mount_point, perc_usage
-                                )),
-                                urgency: Some(Urgency::Critical),
-                                ..Default::default()
-                            }
-                        }
-                        WatchEvents::Memory(e) => {
-                            debug!(
-                                "Memory event: {}/{} bytes used",
-                                e.used_memory, e.total_memory
-                            );
-                            let conf = &conf.memory;
-
-                            let mem_perc = (e.used_memory / e.total_memory) as f64 * 100.0;
-                            if mem_perc < conf.critical_threshold.into() {
-                                continue;
-                            };
-
-                            Notification {
-                                summary: "Memory Critical".to_string(),
-                                body: Some(format!("{:.0}% used", mem_perc)),
-                                urgency: Some(Urgency::Critical),
-                                ..Default::default()
-                            }
-                        }
+                        WatchEvents::Battery(e) => match Self::handle_battery(e, conf.clone()) {
+                            Some(n) => n,
+                            None => continue,
+                        },
+                        WatchEvents::Disk(e) => match Self::handle_disk(e, conf.clone()) {
+                            Some(n) => n,
+                            None => continue,
+                        },
+                        WatchEvents::Memory(e) => match Self::handle_memory(e, conf.clone()) {
+                            Some(n) => n,
+                            None => continue,
+                        },
                     };
                     let _ = self.notifier.notify(notif);
                 }
@@ -153,6 +81,132 @@ impl WatchService {
     pub fn stop(&self) {
         debug!("WatchService::stop()");
         self.running.store(false, Ordering::SeqCst);
+    }
+
+    fn handle_battery(e: BatteryEvent, conf: Arc<Config>) -> Option<Notification> {
+        let conf = &conf.battery;
+        let ret = match e {
+            BatteryEvent::PercentageUpdate(perc) => {
+                debug!("Battery: {}%", perc);
+                if perc > conf.low_threshold {
+                    return None;
+                }
+                let critical = perc <= conf.critical_threshold;
+                let summary = format!("Battery {}", if critical { "Critical" } else { "Low" });
+                let body = format!(
+                    "{}% remaining — {}",
+                    perc,
+                    if critical {
+                        "Connect charger immediately"
+                    } else {
+                        "Connect charger soon"
+                    }
+                );
+                let urgency = if critical {
+                    Urgency::Critical
+                } else {
+                    Urgency::Low
+                };
+                Notification {
+                    summary,
+                    body: Some(body),
+                    urgency: Some(urgency),
+                    app_name: Some(APP_NAME.to_string()),
+                    ..Default::default()
+                }
+            }
+            BatteryEvent::StateUpdate(state) => {
+                debug!("Battery state: {}", state);
+                let urgency = match state {
+                    BatteryState::Empty => Urgency::Critical,
+                    _ => Urgency::Normal,
+                };
+                Notification {
+                    summary: format!("Battery {}", state),
+                    body: Some(Self::battery_to_body(state).to_string()),
+                    urgency: Some(urgency),
+                    app_name: Some(APP_NAME.to_string()),
+                    ..Default::default()
+                }
+            }
+        };
+        Some(ret)
+    }
+
+    fn battery_to_body(state: BatteryState) -> &'static str {
+        match state {
+            BatteryState::Unknown => "Unknown",
+            BatteryState::Charging => "Power connected. Battery is charging",
+            BatteryState::Discharging => "Power disconnected. Running on battery power",
+            BatteryState::Empty => "Battery is completely drained",
+            BatteryState::Full => "Battery is fully charged",
+            BatteryState::PendingCharge => "Pending Charge",
+            BatteryState::PendingDischarge => "Pending Discharge",
+        }
+    }
+
+    fn handle_memory(e: MemoryData, conf: Arc<Config>) -> Option<Notification> {
+        debug!(
+            "Memory event: {}/{} bytes used",
+            e.used_memory, e.total_memory
+        );
+        let conf = &conf.memory;
+
+        let mem_perc = (e.used_memory / e.total_memory) as f64 * 100.0;
+        if mem_perc < conf.critical_threshold.into() {
+            return None;
+        };
+        let body = format!(
+            "{} of {} used ({:.0}%)\nConsider closing unused applications",
+            format_bytes(e.used_memory),
+            format_bytes(e.total_memory),
+            mem_perc
+        );
+
+        Some(Notification {
+            summary: "Memory Critical".to_string(),
+            body: Some(body),
+            urgency: Some(Urgency::Critical),
+            app_name: Some(APP_NAME.to_string()),
+            ..Default::default()
+        })
+    }
+
+    fn handle_disk(e: DiskEvent, conf: Arc<Config>) -> Option<Notification> {
+        debug!(
+            "Disk event: {} at {}",
+            e.name,
+            e.mount_point.to_string_lossy()
+        );
+        let conf = &conf.disk;
+
+        let mount_point = e.mount_point.to_string_lossy().to_string();
+        if !conf.watch_mounts.contains(&mount_point) {
+            return None;
+        }
+
+        let perc_usage = (1.0 - (e.available_space / e.total_space) as f64) * 100.0;
+
+        if perc_usage < conf.critical_threshold.into() {
+            return None;
+        };
+
+        let body = format!(
+            "{} ({}): {} free of {} ({:.0}% used)\nFree up space to prevent system issues",
+            e.name,
+            mount_point,
+            format_bytes(e.available_space),
+            format_bytes(e.total_space),
+            perc_usage
+        );
+
+        Some(Notification {
+            summary: "Disk Almost Full".to_string(),
+            body: Some(body),
+            urgency: Some(Urgency::Critical),
+            app_name: Some(APP_NAME.to_string()),
+            ..Default::default()
+        })
     }
 }
 
