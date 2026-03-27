@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -15,9 +16,9 @@ pub struct Battery {
     running: Arc<AtomicBool>,
 }
 #[derive(Debug)]
-pub struct BatteryData {
-    pub percentage: u8,
-    pub state: BatteryState,
+pub enum BatteryEvent {
+    PercentageUpdate(u8),
+    StateUpdate(BatteryState),
 }
 #[derive(Debug)]
 pub enum BatteryState {
@@ -28,6 +29,20 @@ pub enum BatteryState {
     Full,
     PendingCharge,
     PendingDischarge,
+}
+impl fmt::Display for BatteryState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            BatteryState::Unknown => "Unknown",
+            BatteryState::Charging => "Charging",
+            BatteryState::Discharging => "Unplugged",
+            BatteryState::Empty => "Empty",
+            BatteryState::Full => "Full",
+            BatteryState::PendingCharge => "Pending Charge",
+            BatteryState::PendingDischarge => "Pending Discharge",
+        };
+        write!(f, "{}", s)
+    }
 }
 impl BatteryState {
     pub fn from_upower_variant(variant: u8) -> Result<Self, ModelError> {
@@ -103,7 +118,7 @@ impl Battery {
 
     pub fn publish_to<F>(&self, callback: F) -> Result<(), ModelError>
     where
-        F: Fn(BatteryData) + 'static + Send,
+        F: Fn(BatteryEvent) + 'static + Send,
     {
         self.running.store(true, Ordering::SeqCst);
         let c = Connection::new_system()?;
@@ -115,21 +130,31 @@ impl Battery {
         );
 
         let _id = proxy.match_signal(move |p: PropertiesChanged, _: &Connection, _: &Message| {
-            let perc = p.changed.get("Percentage");
-            let state = p.changed.get("State");
-            debug!("Received battery D-Bus signal: {:?}%, state={:?}", perc, state);
-            if let (Some(state), Some(perc)) = (state, perc) {
-                let percentage = arg::cast::<u8>(&perc.0).copied().unwrap();
-                let state = arg::cast::<u8>(&state.0).copied().unwrap();
+            let perc = p
+                .changed
+                .get("Percentage")
+                .and_then(|v| arg::cast::<f64>(&v.0).copied())
+                .map(|v| v as u8);
+            let state = p
+                .changed
+                .get("State")
+                .and_then(|v| arg::cast::<u32>(&v.0).copied())
+                .map(|v| v as u8);
+            debug!(
+                "Received battery D-Bus signal: perc={:?} state={:?}",
+                perc, state
+            );
 
-                let data = BatteryData {
-                    percentage,
-                    state: BatteryState::from_upower_variant(state).unwrap(),
-                };
-                callback(data);
-                return true;
-            }
-            false
+            let event = match (state, perc) {
+                (Some(s), _) => {
+                    BatteryEvent::StateUpdate(BatteryState::from_upower_variant(s).unwrap())
+                }
+                (_, Some(p)) => BatteryEvent::PercentageUpdate(p),
+                _ => return true,
+            };
+
+            callback(event);
+            true
         });
 
         info!("Battery monitoring loop started");

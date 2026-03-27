@@ -11,7 +11,8 @@ use crate::debug;
 use crate::error;
 use crate::info;
 use crate::model::Battery;
-use crate::model::BatteryData;
+use crate::model::BatteryEvent;
+use crate::model::BatteryState;
 use crate::model::Disk;
 use crate::model::Memory;
 use crate::model::MemoryData;
@@ -54,29 +55,40 @@ impl WatchService {
                     debug!("Received event: {:?}", event);
                     let notif = match event {
                         WatchEvents::Battery(event) => {
-                            debug!("Battery event: {}%", event.percentage);
                             let conf = &conf.battery;
-
-                            if event.percentage > conf.low_threshold {
-                                continue;
-                            }
-
-                            Notification {
-                                summary: format!(
-                                    "Battery {}",
-                                    if event.percentage <= conf.critical_threshold {
-                                        "Critical"
-                                    } else {
-                                        "Low"
+                            match event {
+                                BatteryEvent::PercentageUpdate(perc) => {
+                                    debug!("Battery: {}%", perc);
+                                    if perc > conf.low_threshold {
+                                        continue;
                                     }
-                                ),
-                                body: Some(format!("{}% remaining", event.percentage)),
-                                urgency: Some(if event.percentage <= conf.critical_threshold {
-                                    Urgency::Critical
-                                } else {
-                                    Urgency::Low
-                                }),
-                                ..Default::default()
+                                    let critical = perc <= conf.critical_threshold;
+                                    Notification {
+                                        summary: format!(
+                                            "Battery {}",
+                                            if critical { "Critical" } else { "Low" }
+                                        ),
+                                        body: Some(format!("{}% remaining", perc)),
+                                        urgency: Some(if critical {
+                                            Urgency::Critical
+                                        } else {
+                                            Urgency::Low
+                                        }),
+                                        ..Default::default()
+                                    }
+                                }
+                                BatteryEvent::StateUpdate(state) => {
+                                    debug!("Battery state: {}", state);
+                                    Notification {
+                                        summary: format!("Battery {}", state),
+                                        urgency: Some(match state {
+                                            BatteryState::Empty => Urgency::Critical,
+                                            BatteryState::Discharging => Urgency::Low,
+                                            _ => Urgency::Normal,
+                                        }),
+                                        ..Default::default()
+                                    }
+                                }
                             }
                         }
                         WatchEvents::Disk(event) => {
@@ -225,8 +237,9 @@ impl WatchSource {
         thread::spawn(move || {
             if config.battery.enabled && running.load(Ordering::SeqCst) {
                 info!("Battery monitor thread started");
-                let callback = move |battery: BatteryData| {
-                    tx_c.send(Ok(WatchEvents::Battery(battery))).unwrap();
+                let callback = move |event: BatteryEvent| {
+                    debug!("Received battery event: {event:?}");
+                    tx_c.send(Ok(WatchEvents::Battery(event))).unwrap();
                     if !config.battery.enabled {
                         running.store(false, Ordering::SeqCst);
                     }
@@ -242,7 +255,7 @@ impl WatchSource {
 
 #[derive(Debug)]
 pub enum WatchEvents {
-    Battery(BatteryData),
+    Battery(BatteryEvent),
     Disk(DiskEvent),
     Memory(MemoryData),
 }
