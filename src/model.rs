@@ -12,7 +12,7 @@ use crate::debug;
 use crate::info;
 use crate::warn;
 
-pub struct Battery {
+pub struct BatteryModel {
     running: Arc<AtomicBool>,
 }
 #[derive(Debug)]
@@ -63,8 +63,8 @@ impl BatteryState {
         Ok(ret)
     }
 }
-pub struct Disk;
-pub struct Memory;
+pub struct DiskModel;
+pub struct MemoryModel;
 #[derive(Debug)]
 pub struct MemoryData {
     pub total_memory: u64,
@@ -73,7 +73,7 @@ pub struct MemoryData {
     pub used_swap: u64,
 }
 
-impl Disk {
+impl DiskModel {
     pub fn new() -> Self {
         Self {}
     }
@@ -84,7 +84,7 @@ impl Disk {
     }
 }
 
-impl Memory {
+impl MemoryModel {
     pub fn new() -> Self {
         Self {}
     }
@@ -107,7 +107,7 @@ impl Memory {
     }
 }
 
-impl Battery {
+impl BatteryModel {
     pub fn new(running: Option<Arc<AtomicBool>>) -> Self {
         let running = match running {
             Some(running) => running,

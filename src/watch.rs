@@ -11,12 +11,12 @@ use crate::config::Config;
 use crate::debug;
 use crate::error;
 use crate::info;
-use crate::model::Battery;
 use crate::model::BatteryEvent;
+use crate::model::BatteryModel;
 use crate::model::BatteryState;
-use crate::model::Disk;
-use crate::model::Memory;
+use crate::model::DiskModel;
 use crate::model::MemoryData;
+use crate::model::MemoryModel;
 use crate::notify::Notifiable;
 use crate::notify::Notification;
 use crate::notify::Urgency;
@@ -241,19 +241,19 @@ impl Drop for WatchService {
 pub struct WatchSource {
     config: Arc<Config>,
     running: Arc<AtomicBool>,
-    battery: Arc<Battery>,
-    disk: Arc<Disk>,
-    memory: Arc<Memory>,
+    battery: Arc<BatteryModel>,
+    disk: Arc<DiskModel>,
+    memory: Arc<MemoryModel>,
 }
 
 impl WatchSource {
     pub fn new(config: Arc<Config>, running: Arc<AtomicBool>) -> Self {
         Self {
             config,
-            battery: Arc::new(Battery::new(Some(running.clone()))),
+            battery: Arc::new(BatteryModel::new(Some(running.clone()))),
             running,
-            disk: Arc::new(Disk::new()),
-            memory: Arc::new(Memory::new()),
+            disk: Arc::new(DiskModel::new()),
+            memory: Arc::new(MemoryModel::new()),
         }
     }
 
