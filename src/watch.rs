@@ -21,6 +21,7 @@ use crate::notify::Notifiable;
 use crate::notify::Notification;
 use crate::notify::Urgency;
 use crate::utils::format_bytes;
+use crate::utils::top_ps_by_mem;
 
 pub struct WatchService {
     config: Arc<Config>,
@@ -146,27 +147,47 @@ impl WatchService {
     }
 
     fn handle_memory(e: MemoryData, conf: Arc<Config>) -> Option<Notification> {
-        debug!(
-            "Memory event: {}/{} bytes used",
-            e.used_memory, e.total_memory
-        );
         let conf = &conf.memory;
+        let mem_perc = (e.used_memory as f64 / e.total_memory as f64) * 100.0;
+        debug!(
+            "Memory: {}/{} bytes ({:.0}%)",
+            e.used_memory, e.total_memory, mem_perc
+        );
 
-        let mem_perc = (e.used_memory / e.total_memory) as f64 * 100.0;
-        if mem_perc < conf.critical_threshold.into() {
+        if mem_perc < conf.warning_threshold as f64 {
             return None;
+        }
+
+        let critical = mem_perc >= conf.critical_threshold as f64;
+        let summary = if critical {
+            "Memory Critical"
+        } else {
+            "Memory Warning"
         };
-        let body = format!(
-            "{} of {} used ({:.0}%)\nConsider closing unused applications",
+        let urgency = if critical {
+            Urgency::Critical
+        } else {
+            Urgency::Normal
+        };
+
+        let mut body = format!(
+            "{} of {} used ({:.0}%)",
             format_bytes(e.used_memory),
             format_bytes(e.total_memory),
             mem_perc
         );
 
+        if critical {
+            body.push_str("\nConsider closing unused applications\nTop memory consumers:");
+            for c in top_ps_by_mem(5) {
+                body.push_str(&format!("\n  {}: {}", c.name, format_bytes(c.usage)));
+            }
+        }
+
         Some(Notification {
-            summary: "Memory Critical".to_string(),
+            summary: summary.to_string(),
             body: Some(body),
-            urgency: Some(Urgency::Critical),
+            urgency: Some(urgency),
             app_name: Some(APP_NAME.to_string()),
             ..Default::default()
         })

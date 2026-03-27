@@ -2,6 +2,10 @@ use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
+use sysinfo::ProcessRefreshKind;
+use sysinfo::RefreshKind;
+use sysinfo::System;
+
 use crate::debug;
 
 pub fn conf_dir() -> PathBuf {
@@ -32,4 +36,27 @@ pub fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{} B", bytes)
     }
+}
+
+pub fn top_ps_by_mem(limit: usize) -> Vec<MemoryConsumer> {
+    let refresh =
+        RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing().with_memory());
+    let mut ps: Vec<_> = System::new_with_specifics(refresh)
+        .processes()
+        .iter()
+        .filter(|(_, p)| p.thread_kind().is_none())
+        .map(|(_, p)| MemoryConsumer {
+            name: p.name().to_string_lossy().into(),
+            usage: p.memory(),
+        })
+        .collect();
+    ps.sort_by_key(|m| std::cmp::Reverse(m.usage));
+    ps.truncate(limit);
+    ps
+}
+
+#[derive(Clone, Debug)]
+pub struct MemoryConsumer {
+    pub name: String,
+    pub usage: u64,
 }
